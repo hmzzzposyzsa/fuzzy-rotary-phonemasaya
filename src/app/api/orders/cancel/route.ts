@@ -14,9 +14,12 @@ export async function POST(req: NextRequest) {
   const orderId = body?.orderId;
   if (!orderId) return NextResponse.json({ error: "orderId diperlukan" }, { status: 400 });
 
+  // await — karena getOrder sekarang async (Supabase)
   const order = await getOrder(orderId);
   if (!order) return NextResponse.json({ error: "Order tidak ditemukan" }, { status: 404 });
-  if (order.status !== "pending") return NextResponse.json({ error: "Order tidak bisa dibatalkan" }, { status: 400 });
+  if (order.status !== "pending") {
+    return NextResponse.json({ error: "Order tidak bisa dibatalkan" }, { status: 400 });
+  }
 
   if (order.pgOrderId) await cancelPayment(order.pgOrderId);
   await updateOrderStatus(orderId, "expired");
