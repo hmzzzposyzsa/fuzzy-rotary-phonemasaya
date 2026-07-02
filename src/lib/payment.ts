@@ -52,14 +52,22 @@ export async function createPayment(
 
     const data = await res.json();
 
+    // DEBUG — bisa dilihat di Vercel Functions logs
+    // Hapus baris ini setelah field mapping sudah benar
+    console.log("[PG createPayment response]", JSON.stringify(data));
+
     // Sesuaikan field mapping di bawah dengan response asli dari PG kamu.
-    // Kalau nama field-nya beda, edit bagian ini saja.
     return {
       ok:         true,
-      qrisUrl:    data.qris_url    || data.qrisUrl    || data.image_url || null,
-      qrisData:   data.qris_data   || data.qrisData   || null,
-      pgOrderId:  data.order_id    || data.orderId    || data.id        || null,
-      expiredAt:  data.expired_at  || data.expiredAt  || null,
+      qrisUrl:    data.qris_url    || data.qrisUrl    || data.image_url
+                  || data.qr_url  || data.url         || data.data?.qris_url
+                  || data.data?.url || null,
+      qrisData:   data.qris_data   || data.qrisData   || data.qr_string
+                  || data.data?.qris_data || null,
+      pgOrderId:  data.order_id    || data.orderId    || data.id
+                  || data.data?.order_id || null,
+      expiredAt:  data.expired_at  || data.expiredAt  || data.expire
+                  || data.expired  || data.data?.expired_at || null,
     };
   } catch (err: any) {
     return { ok: false, error: err?.message || "Network error" };
@@ -88,7 +96,9 @@ export async function checkPaymentStatus(
     }
 
     const data = await res.json();
-    const raw = (data.status || data.payment_status || "pending").toLowerCase();
+    console.log("[PG checkStatus response]", JSON.stringify(data));
+
+    const raw = (data.status || data.payment_status || data.data?.status || "pending").toLowerCase();
 
     const statusMap: Record<string, CheckStatusResult["status"]> = {
       success: "success", paid: "success", settlement: "success",
