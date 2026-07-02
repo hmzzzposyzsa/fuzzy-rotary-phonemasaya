@@ -7,7 +7,6 @@ import { generateOrderId, saveOrder } from "@/lib/orders";
 import { getProductById } from "@/lib/api";
 
 export async function POST(req: NextRequest) {
-  // Rate limit: max 3 order per menit per IP
   const ip = getIp(req);
   const { success, reset } = await rateLimit(ip, "payment");
   if (!success) {
@@ -21,7 +20,7 @@ export async function POST(req: NextRequest) {
   const { data, error } = parseBody(CreateOrderSchema, body);
   if (error || !data) return NextResponse.json({ error: error ?? "Invalid body" }, { status: 400 });
 
-  // Ambil detail produk dari API eksternal untuk validasi harga
+  // Ambil detail produk dari API eksternal
   let product: Awaited<ReturnType<typeof getProductById>>;
   try {
     product = await getProductById(data.productId);
@@ -46,8 +45,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Simpan order ke store
-  saveOrder({
+  // Kalau PG tidak return expiredAt, default 15 menit dari sekarang
+  const expiredAt = pgResult.expiredAt
+    ? pgResult.expiredAt
+    : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+  // Simpan order ke Supabase
+  await saveOrder({
     orderId,
     pgOrderId:     pgResult.pgOrderId ?? null,
     productId:     data.productId,
@@ -61,18 +65,18 @@ export async function POST(req: NextRequest) {
     status:        "pending",
     qrisUrl:       pgResult.qrisUrl ?? null,
     qrisData:      pgResult.qrisData ?? null,
-    expiredAt:     pgResult.expiredAt ?? null,
+    expiredAt,
     createdAt:     new Date().toISOString(),
     paidAt:        null,
   });
 
   return NextResponse.json({
-    ok:      true,
+    ok:          true,
     orderId,
-    qrisUrl:  pgResult.qrisUrl,
-    qrisData: pgResult.qrisData,
-    expiredAt: pgResult.expiredAt,
-    amount:   product.price,
+    qrisUrl:     pgResult.qrisUrl,
+    qrisData:    pgResult.qrisData,
+    expiredAt,
+    amount:      product.price,
     productName: product.name,
   });
 }
