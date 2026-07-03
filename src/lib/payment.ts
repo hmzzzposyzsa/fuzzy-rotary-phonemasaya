@@ -9,9 +9,9 @@ function pgHeaders() {
 }
 
 export interface CreatePaymentPayload {
-  amount:    number;
-  itemName:  string;
-  orderId:   string;
+  amount:   number;
+  itemName: string;
+  orderId:  string;
 }
 
 export interface CreatePaymentResult {
@@ -28,7 +28,7 @@ export async function createPayment(p: CreatePaymentPayload): Promise<CreatePaym
       method:  "POST",
       headers: pgHeaders(),
       body: JSON.stringify({
-        idOrder:   p.orderId,   // kirim order ID kita ke PG
+        idOrder:   p.orderId,
         hargaAsli: p.amount,
         item:      p.itemName,
       }),
@@ -42,29 +42,25 @@ export async function createPayment(p: CreatePaymentPayload): Promise<CreatePaym
     const json = await res.json();
     console.log("[PG createPayment response]", JSON.stringify(json));
 
-    // Support dua format response: { success, data: {...} } atau flat {...}
     const d = json.data ?? json;
-
     if (json.success === false) {
       return { ok: false, error: json.message || "PG error" };
     }
 
-    // expiredAt dari PG: "2026-07-03 01:08:56" (WIB +07:00) → ISO
     let expiredAt: string | null = null;
     if (d.timestampExpired) {
       expiredAt = new Date(Number(d.timestampExpired) * 1000).toISOString();
     } else if (d.expiredAt) {
       expiredAt = new Date(d.expiredAt.replace(" ", "T") + "+07:00").toISOString();
     }
-
     if (!expiredAt) {
       expiredAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     }
 
     return {
       ok:        true,
-      qrisUrl:   d.qrisUrl  || null,
-      pgOrderId: d.idOrder  || p.orderId,
+      qrisUrl:   d.qrisUrl || null,
+      pgOrderId: d.idOrder || p.orderId, // simpan idOrder dari PG, fallback ke punya kita
       expiredAt,
     };
   } catch (err: any) {
@@ -78,12 +74,12 @@ export interface CheckStatusResult {
   error?:  string;
 }
 
-export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatusResult> {
+export async function checkPaymentStatus(idOrder: string): Promise<CheckStatusResult> {
   try {
     const res = await fetch(`${PG_BASE}/check-status.php`, {
       method:  "POST",
       headers: pgHeaders(),
-      body:    JSON.stringify({ idOrder: pgOrderId }),
+      body:    JSON.stringify({ idOrder }),
     });
 
     if (!res.ok) return { ok: false, error: `PG error ${res.status}` };
@@ -91,8 +87,9 @@ export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatus
     const json = await res.json();
     console.log("[PG checkStatus response]", JSON.stringify(json));
 
-    const d   = json.data ?? json;
-    const raw = (d.status || "PENDING").toUpperCase();
+    // PG return array [{...}] atau object {data:{...}} atau flat {...}
+    const raw_data = Array.isArray(json) ? json[0] : (json.data ?? json);
+    const raw = (raw_data.status || "PENDING").toUpperCase();
 
     const map: Record<string, CheckStatusResult["status"]> = {
       SUCCESS: "success", PAID: "success", SETTLEMENT: "success",
@@ -107,12 +104,12 @@ export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatus
   }
 }
 
-export async function cancelPayment(pgOrderId: string): Promise<{ ok: boolean; error?: string }> {
+export async function cancelPayment(idOrder: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`${PG_BASE}/cancel.php`, {
       method:  "POST",
       headers: pgHeaders(),
-      body:    JSON.stringify({ idOrder: pgOrderId }),
+      body:    JSON.stringify({ idOrder }),
     });
     if (!res.ok) return { ok: false, error: `PG error ${res.status}` };
     return { ok: true };
