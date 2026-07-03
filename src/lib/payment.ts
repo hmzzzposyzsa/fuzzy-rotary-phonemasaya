@@ -87,9 +87,9 @@ export async function checkPaymentStatus(idOrder: string): Promise<CheckStatusRe
     const json = await res.json();
     console.log("[PG checkStatus response]", JSON.stringify(json));
 
-    // PG return array [{...}] atau object {data:{...}} atau flat {...}
-    const raw_data = Array.isArray(json) ? json[0] : (json.data ?? json);
-    const raw = (raw_data.status || "PENDING").toUpperCase();
+    // Response flat langsung: { success, idOrder, status, ... }
+    // Bukan { data: {...} } atau [{...}]
+    const raw = (json.status || "PENDING").toUpperCase();
 
     const map: Record<string, CheckStatusResult["status"]> = {
       SUCCESS: "success", PAID: "success", SETTLEMENT: "success",
