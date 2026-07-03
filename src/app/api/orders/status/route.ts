@@ -13,7 +13,6 @@ export async function GET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get("orderId");
   if (!orderId) return NextResponse.json({ error: "orderId diperlukan" }, { status: 400 });
 
-  // Ambil dari Supabase — bukan in-memory
   const order = await getOrder(orderId);
   if (!order) return NextResponse.json({ error: "Order tidak ditemukan" }, { status: 404 });
 
@@ -22,15 +21,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ status: order.status, order });
   }
 
-  // Cek status ke payment gateway
-  if (order.pgOrderId) {
-    const pgResult = await checkPaymentStatus(order.pgOrderId);
-    if (pgResult.ok && pgResult.status && pgResult.status !== "pending") {
-      const updated = await updateOrderStatus(orderId, pgResult.status, {
-        paidAt: pgResult.status === "success" ? new Date().toISOString() : null,
-      });
-      return NextResponse.json({ status: pgResult.status, order: updated ?? order });
-    }
+  // pgOrderId fallback ke orderId kita sendiri
+  // (karena PG sekarang pakai order ID kita sebagai idOrder)
+  const pgOrderId = order.pgOrderId || order.orderId;
+
+  const pgResult = await checkPaymentStatus(pgOrderId);
+  if (pgResult.ok && pgResult.status && pgResult.status !== "pending") {
+    const updated = await updateOrderStatus(orderId, pgResult.status, {
+      paidAt: pgResult.status === "success" ? new Date().toISOString() : null,
+    });
+    return NextResponse.json({ status: pgResult.status, order: updated ?? order });
   }
 
   return NextResponse.json({ status: order.status, order });
