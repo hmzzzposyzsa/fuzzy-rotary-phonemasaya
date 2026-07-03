@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
   const orderId = generateOrderId();
 
   const pgResult = await createPayment({
-    amount:        product.price,
-    itemName:      product.name,
+    amount:   product.price,
+    itemName: product.name,
     orderId,
   });
 
@@ -42,13 +42,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Default 5 menit kalau PG tidak return expiredAt
   const expiredAt = pgResult.expiredAt
     ? pgResult.expiredAt
     : new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-  // PENTING: await dulu sebelum return — supaya order tersimpan ke Supabase
-  // sebelum frontend mulai polling /api/orders/status
   try {
     await saveOrder({
       orderId,
@@ -69,7 +66,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error("[saveOrder error]", err?.message);
-    // Tetap lanjut walaupun Supabase gagal — QR tetap bisa tampil
   }
 
   return NextResponse.json({
