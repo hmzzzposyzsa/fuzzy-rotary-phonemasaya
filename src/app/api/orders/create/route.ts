@@ -33,7 +33,6 @@ export async function POST(req: NextRequest) {
     amount:        product.price,
     itemName:      product.name,
     orderId,
-    customerEmail: data.email,
   });
 
   if (!pgResult.ok) {
@@ -64,7 +63,6 @@ export async function POST(req: NextRequest) {
       paymentMethod: "qris",
       status:        "pending",
       qrisUrl:       pgResult.qrisUrl ?? null,
-      qrisData:      pgResult.qrisData ?? null,
       expiredAt,
       createdAt:     new Date().toISOString(),
       paidAt:        null,
@@ -78,7 +76,6 @@ export async function POST(req: NextRequest) {
     ok:          true,
     orderId,
     qrisUrl:     pgResult.qrisUrl,
-    qrisData:    pgResult.qrisData,
     expiredAt,
     amount:      product.price,
     productName: product.name,
