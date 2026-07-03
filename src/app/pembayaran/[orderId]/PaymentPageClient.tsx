@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, RefreshCw, X, QrCode, ShieldCheck } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
 
@@ -11,13 +10,15 @@ interface OrderData {
   productName: string;
   amount:      number;
   qrisUrl:     string | null;
-  qrisData:    string | null;
   expiredAt:   string | null;
   status:      "pending" | "success" | "failed" | "expired";
 }
 
 function useCountdown(expiredAt: string | null) {
-  const [seconds, setSeconds] = useState(0);
+  const [seconds, setSeconds] = useState<number>(() => {
+    if (!expiredAt) return 5 * 60; // default 5 menit
+    return Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000));
+  });
 
   useEffect(() => {
     if (!expiredAt) return;
@@ -37,30 +38,48 @@ function useCountdown(expiredAt: string | null) {
 
 export default function PaymentPageClient({ orderId }: { orderId: string }) {
   const router = useRouter();
-  const [order, setOrder] = useState<OrderData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const searchParams = useSearchParams();
+
+  // Ambil data dari URL params dulu (dikirim dari ProductDetailClient saat redirect)
+  // supaya QR langsung tampil tanpa nunggu Supabase
+  const [order, setOrder] = useState<OrderData>({
+    orderId,
+    productName: searchParams.get("name")    || "",
+    amount:      Number(searchParams.get("amount") || 0),
+    qrisUrl:     searchParams.get("qrisUrl") || null,
+    expiredAt:   searchParams.get("expiredAt") || null,
+    status:      "pending",
+  });
+
   const [cancelling, setCancelling] = useState(false);
-  const { display: countdown, expired: isExpired } = useCountdown(order?.expiredAt ?? null);
+  const { display: countdown, expired: isExpired } = useCountdown(order.expiredAt);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders/status?orderId=${orderId}`);
+      if (!res.ok) return;
       const data = await res.json();
-      if (!res.ok) { setLoading(false); return; }
-      setOrder(data.order);
-      setLoading(false);
+
+      // Update status & data dari Supabase kalau sudah ada
+      setOrder((prev) => ({
+        ...prev,
+        status:     data.status ?? prev.status,
+        qrisUrl:    data.order?.qrisUrl  ?? prev.qrisUrl,
+        expiredAt:  data.order?.expiredAt ?? prev.expiredAt,
+        productName: data.order?.productName ?? prev.productName,
+        amount:     data.order?.amount   ?? prev.amount,
+      }));
 
       if (data.status === "success") {
         router.push(`/pembayaran/${orderId}/success`);
       }
     } catch {
-      setLoading(false);
+      // Abaikan error polling — QR tetap tampil dari URL params
     }
   }, [orderId, router]);
 
   // Poll status tiap 3 detik
   useEffect(() => {
-    fetchStatus();
     const iv = setInterval(fetchStatus, 3000);
     return () => clearInterval(iv);
   }, [fetchStatus]);
@@ -75,23 +94,7 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
     router.push("/produk");
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-32">
-        <div className="w-10 h-10 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (!order) {
-    return (
-      <div className="text-center py-24 text-muted">
-        <p>Order tidak ditemukan.</p>
-      </div>
-    );
-  }
-
-  const isExpiredStatus = order.status === "expired" || (isExpired && order.status === "pending");
+  const isExpiredStatus = order.status === "expired" || order.status === "failed" || isExpired;
 
   return (
     <div className="max-w-md mx-auto">
@@ -105,20 +108,24 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
         <div className="px-5 py-4 border-b border-border">
           <div className="flex justify-between text-sm mb-1.5">
             <span className="text-muted">No. Invoice</span>
-            <span className="font-mono font-semibold text-xs">{order.orderId}</span>
+            <span className="font-mono font-semibold text-xs">{orderId}</span>
           </div>
-          <div className="flex justify-between text-sm mb-1.5">
-            <span className="text-muted">Produk</span>
-            <span className="font-semibold text-right max-w-[60%] truncate">{order.productName}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-muted">Total</span>
-            <span className="font-black text-primary">{formatRupiah(order.amount)}</span>
-          </div>
+          {order.productName && (
+            <div className="flex justify-between text-sm mb-1.5">
+              <span className="text-muted">Produk</span>
+              <span className="font-semibold text-right max-w-[60%] truncate">{order.productName}</span>
+            </div>
+          )}
+          {order.amount > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-muted">Total</span>
+              <span className="font-black text-primary">{formatRupiah(order.amount)}</span>
+            </div>
+          )}
         </div>
 
         {/* Countdown */}
-        {!isExpiredStatus && order.expiredAt && (
+        {!isExpiredStatus && (
           <div className="flex items-center justify-center gap-2 py-3 bg-yellow-400/8 border-b border-border">
             <Clock size={14} className="text-yellow-400" />
             <span className="text-sm font-semibold text-yellow-400">
@@ -160,14 +167,12 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
           )}
         </div>
 
-        {/* Footer info */}
         <div className="px-5 py-4 border-t border-border flex items-center justify-center gap-2">
           <ShieldCheck size={13} className="text-emerald-500" />
-          <span className="text-xs text-muted">Pembayaran aman & terenkripsi</span>
+          <span className="text-xs text-muted">Pembayaran aman &amp; terenkripsi</span>
         </div>
       </div>
 
-      {/* Actions */}
       <div className="flex flex-col gap-3">
         <button
           onClick={fetchStatus}
