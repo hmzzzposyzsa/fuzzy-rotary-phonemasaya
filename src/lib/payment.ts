@@ -9,29 +9,28 @@ function pgHeaders() {
 }
 
 export interface CreatePaymentPayload {
-  amount:       number;
-  itemName:     string;
-  orderId:      string;
-  customerEmail?: string;
+  amount:    number;
+  itemName:  string;
+  orderId:   string;
 }
 
 export interface CreatePaymentResult {
   ok:         boolean;
   qrisUrl?:   string | null;
-  qrisData?:  string | null;
   pgOrderId?: string | null;
   expiredAt?: string | null;
   error?:     string;
 }
 
-export async function createPayment(payload: CreatePaymentPayload): Promise<CreatePaymentResult> {
+export async function createPayment(p: CreatePaymentPayload): Promise<CreatePaymentResult> {
   try {
     const res = await fetch(`${PG_BASE}/order.php`, {
       method:  "POST",
       headers: pgHeaders(),
-      body:    JSON.stringify({
-        hargaAsli: payload.amount,
-        item:      payload.itemName,
+      body: JSON.stringify({
+        idOrder:   p.orderId,   // kirim order ID kita ke PG
+        hargaAsli: p.amount,
+        item:      p.itemName,
       }),
     });
 
@@ -43,25 +42,29 @@ export async function createPayment(payload: CreatePaymentPayload): Promise<Crea
     const json = await res.json();
     console.log("[PG createPayment response]", JSON.stringify(json));
 
-    if (!json.success || !json.data) {
-      return { ok: false, error: json.message || "PG mengembalikan error" };
+    // Support dua format response: { success, data: {...} } atau flat {...}
+    const d = json.data ?? json;
+
+    if (json.success === false) {
+      return { ok: false, error: json.message || "PG error" };
     }
 
-    const d = json.data;
-
-    // expiredAt dari PG: "2026-07-03 01:08:56" (WIB/+07:00) → ISO
+    // expiredAt dari PG: "2026-07-03 01:08:56" (WIB +07:00) → ISO
     let expiredAt: string | null = null;
-    if (d.expiredAt) {
-      expiredAt = new Date(d.expiredAt.replace(" ", "T") + "+07:00").toISOString();
-    } else if (d.timestampExpired) {
+    if (d.timestampExpired) {
       expiredAt = new Date(Number(d.timestampExpired) * 1000).toISOString();
+    } else if (d.expiredAt) {
+      expiredAt = new Date(d.expiredAt.replace(" ", "T") + "+07:00").toISOString();
+    }
+
+    if (!expiredAt) {
+      expiredAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
     }
 
     return {
       ok:        true,
       qrisUrl:   d.qrisUrl  || null,
-      qrisData:  d.qrisData || null,
-      pgOrderId: d.idOrder  || null,
+      pgOrderId: d.idOrder  || p.orderId,
       expiredAt,
     };
   } catch (err: any) {
@@ -88,23 +91,17 @@ export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatus
     const json = await res.json();
     console.log("[PG checkStatus response]", JSON.stringify(json));
 
-    const d   = json.data || json;
-    const raw = (d.status || json.status || "PENDING").toUpperCase();
+    const d   = json.data ?? json;
+    const raw = (d.status || "PENDING").toUpperCase();
 
-    const statusMap: Record<string, CheckStatusResult["status"]> = {
-      SUCCESS:    "success",
-      PAID:       "success",
-      SETTLEMENT: "success",
-      PENDING:    "pending",
-      WAITING:    "pending",
-      FAILED:     "failed",
-      FAILURE:    "failed",
-      DENY:       "failed",
-      EXPIRED:    "expired",
-      CANCEL:     "expired",
+    const map: Record<string, CheckStatusResult["status"]> = {
+      SUCCESS: "success", PAID: "success", SETTLEMENT: "success",
+      PENDING: "pending", WAITING: "pending",
+      FAILED:  "failed",  FAILURE: "failed", DENY: "failed",
+      EXPIRED: "expired", CANCEL:  "expired",
     };
 
-    return { ok: true, status: statusMap[raw] ?? "pending" };
+    return { ok: true, status: map[raw] ?? "pending" };
   } catch (err: any) {
     return { ok: false, error: err?.message || "Network error" };
   }
