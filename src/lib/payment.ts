@@ -9,9 +9,9 @@ function pgHeaders() {
 }
 
 export interface CreatePaymentPayload {
-  amount:      number;
-  itemName:    string;
-  orderId:     string;
+  amount:       number;
+  itemName:     string;
+  orderId:      string;
   customerEmail?: string;
 }
 
@@ -19,17 +19,17 @@ export interface CreatePaymentResult {
   ok:         boolean;
   qrisUrl?:   string | null;
   qrisData?:  string | null;
-  pgOrderId?: string | null;  // ZXT-DEP-xxxxxx dari PG
-  expiredAt?: string | null;  // ISO string
+  pgOrderId?: string | null;
+  expiredAt?: string | null;
   error?:     string;
 }
 
 export async function createPayment(payload: CreatePaymentPayload): Promise<CreatePaymentResult> {
   try {
     const res = await fetch(`${PG_BASE}/order.php`, {
-      method: "POST",
+      method:  "POST",
       headers: pgHeaders(),
-      body: JSON.stringify({
+      body:    JSON.stringify({
         hargaAsli: payload.amount,
         item:      payload.itemName,
       }),
@@ -43,26 +43,25 @@ export async function createPayment(payload: CreatePaymentPayload): Promise<Crea
     const json = await res.json();
     console.log("[PG createPayment response]", JSON.stringify(json));
 
-    // Response struktur: { success: true, data: { idOrder, qrisUrl, expiredAt, ... } }
     if (!json.success || !json.data) {
       return { ok: false, error: json.message || "PG mengembalikan error" };
     }
 
     const d = json.data;
 
-    // expiredAt dari PG format "2026-07-03 01:08:56" → convert ke ISO
+    // expiredAt dari PG: "2026-07-03 01:08:56" (WIB/+07:00) → ISO
     let expiredAt: string | null = null;
     if (d.expiredAt) {
       expiredAt = new Date(d.expiredAt.replace(" ", "T") + "+07:00").toISOString();
     } else if (d.timestampExpired) {
-      expiredAt = new Date(d.timestampExpired * 1000).toISOString();
+      expiredAt = new Date(Number(d.timestampExpired) * 1000).toISOString();
     }
 
     return {
       ok:        true,
-      qrisUrl:   d.qrisUrl   || null,
-      qrisData:  d.qrisData  || null,
-      pgOrderId: d.idOrder   || null,   // "ZXT-DEP-251681"
+      qrisUrl:   d.qrisUrl  || null,
+      qrisData:  d.qrisData || null,
+      pgOrderId: d.idOrder  || null,
       expiredAt,
     };
   } catch (err: any) {
@@ -70,7 +69,6 @@ export async function createPayment(payload: CreatePaymentPayload): Promise<Crea
   }
 }
 
-// ── Check Status ──
 export interface CheckStatusResult {
   ok:      boolean;
   status?: "pending" | "success" | "failed" | "expired";
@@ -80,9 +78,9 @@ export interface CheckStatusResult {
 export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatusResult> {
   try {
     const res = await fetch(`${PG_BASE}/check-status.php`, {
-      method: "POST",
+      method:  "POST",
       headers: pgHeaders(),
-      body: JSON.stringify({ idOrder: pgOrderId }),  // kirim idOrder sesuai format PG
+      body:    JSON.stringify({ idOrder: pgOrderId }),
     });
 
     if (!res.ok) return { ok: false, error: `PG error ${res.status}` };
@@ -90,10 +88,9 @@ export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatus
     const json = await res.json();
     console.log("[PG checkStatus response]", JSON.stringify(json));
 
-    const d = json.data || json;
-    const raw = (d.status || json.status || "pending").toUpperCase();
+    const d   = json.data || json;
+    const raw = (d.status || json.status || "PENDING").toUpperCase();
 
-    // Mapping status PG → status internal
     const statusMap: Record<string, CheckStatusResult["status"]> = {
       SUCCESS:    "success",
       PAID:       "success",
@@ -107,6 +104,25 @@ export async function checkPaymentStatus(pgOrderId: string): Promise<CheckStatus
       CANCEL:     "expired",
     };
 
+    return { ok: true, status: statusMap[raw] ?? "pending" };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || "Network error" };
+  }
+}
+
+export async function cancelPayment(pgOrderId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${PG_BASE}/cancel.php`, {
+      method:  "POST",
+      headers: pgHeaders(),
+      body:    JSON.stringify({ idOrder: pgOrderId }),
+    });
+    if (!res.ok) return { ok: false, error: `PG error ${res.status}` };
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message };
+  }
+}
     return { ok: true, status: statusMap[raw] ?? "pending" };
   } catch (err: any) {
     return { ok: false, error: err?.message || "Network error" };
