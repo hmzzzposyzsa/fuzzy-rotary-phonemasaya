@@ -61,7 +61,13 @@ export default function ProductDetailClient({
       }
 
       // Redirect ke halaman pembayaran
-      router.push(`/pembayaran/${data.orderId}`);
+      const params = new URLSearchParams({
+        name:      data.productName || "",
+        amount:    String(data.amount || 0),
+        expiredAt: data.expiredAt   || "",
+        qrisUrl:   data.qrisUrl     || "",
+      });
+      router.push(`/pembayaran/${data.orderId}?${params.toString()}`);
     } catch {
       setFormError("Terjadi kesalahan. Coba lagi.");
       setShowConfirm(false);
