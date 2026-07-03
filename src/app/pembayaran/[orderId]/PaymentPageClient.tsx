@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, RefreshCw, X, QrCode, ShieldCheck } from "lucide-react";
 import { formatRupiah } from "@/lib/format";
@@ -15,39 +15,37 @@ interface OrderData {
 }
 
 function useCountdown(expiredAt: string | null) {
-  const [seconds, setSeconds] = useState<number>(() => {
-    if (!expiredAt) return 5 * 60; // default 5 menit
-    return Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000));
-  });
+  const calc = () =>
+    expiredAt
+      ? Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000))
+      : 0;
+
+  const [seconds, setSeconds] = useState(calc);
 
   useEffect(() => {
     if (!expiredAt) return;
-    const update = () => {
-      const diff = Math.max(0, Math.floor((new Date(expiredAt).getTime() - Date.now()) / 1000));
-      setSeconds(diff);
-    };
-    update();
-    const iv = setInterval(update, 1000);
+    setSeconds(calc());
+    const iv = setInterval(() => setSeconds(calc()), 1000);
     return () => clearInterval(iv);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiredAt]);
 
   const m = Math.floor(seconds / 60).toString().padStart(2, "0");
   const s = (seconds % 60).toString().padStart(2, "0");
-  return { display: `${m}:${s}`, expired: seconds === 0 };
+  return { display: `${m}:${s}`, expired: seconds === 0 && expiredAt !== null };
 }
 
 export default function PaymentPageClient({ orderId }: { orderId: string }) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const router      = useRouter();
+  const params      = useSearchParams();
+  const fetchedOnce = useRef(false);
 
-  // Ambil data dari URL params dulu (dikirim dari ProductDetailClient saat redirect)
-  // supaya QR langsung tampil tanpa nunggu Supabase
   const [order, setOrder] = useState<OrderData>({
     orderId,
-    productName: searchParams.get("name")    || "",
-    amount:      Number(searchParams.get("amount") || 0),
-    qrisUrl:     searchParams.get("qrisUrl") || null,
-    expiredAt:   searchParams.get("expiredAt") || null,
+    productName: params.get("name")      || "",
+    amount:      Number(params.get("amount") || 0),
+    qrisUrl:     params.get("qrisUrl")   || null,
+    expiredAt:   params.get("expiredAt") || null,
     status:      "pending",
   });
 
@@ -56,29 +54,35 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`/api/orders/status?orderId=${orderId}`);
+      const res  = await fetch(`/api/orders/status?orderId=${orderId}`);
       if (!res.ok) return;
       const data = await res.json();
 
-      // Update status & data dari Supabase kalau sudah ada
       setOrder((prev) => ({
         ...prev,
-        status:     data.status ?? prev.status,
-        qrisUrl:    data.order?.qrisUrl  ?? prev.qrisUrl,
-        expiredAt:  data.order?.expiredAt ?? prev.expiredAt,
-        productName: data.order?.productName ?? prev.productName,
-        amount:     data.order?.amount   ?? prev.amount,
+        status:      data.status                  ?? prev.status,
+        qrisUrl:     data.order?.qrisUrl          ?? prev.qrisUrl,
+        expiredAt:   data.order?.expiredAt        ?? prev.expiredAt,
+        productName: data.order?.productName      ?? prev.productName,
+        amount:      data.order?.amount           ?? prev.amount,
       }));
 
       if (data.status === "success") {
         router.push(`/pembayaran/${orderId}/success`);
       }
     } catch {
-      // Abaikan error polling — QR tetap tampil dari URL params
+      // polling error — abaikan, QR tetap tampil dari URL params
     }
   }, [orderId, router]);
 
-  // Poll status tiap 3 detik
+  // Fetch sekali langsung saat mount untuk sync data dari Supabase
+  useEffect(() => {
+    if (fetchedOnce.current) return;
+    fetchedOnce.current = true;
+    fetchStatus();
+  }, [fetchStatus]);
+
+  // Polling tiap 3 detik
   useEffect(() => {
     const iv = setInterval(fetchStatus, 3000);
     return () => clearInterval(iv);
@@ -87,31 +91,36 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
   async function handleCancel() {
     setCancelling(true);
     await fetch("/api/orders/cancel", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderId }),
+      body:    JSON.stringify({ orderId }),
     });
     router.push("/produk");
   }
 
-  const isExpiredStatus = order.status === "expired" || order.status === "failed" || isExpired;
+  const isExpiredStatus =
+    order.status === "expired" ||
+    order.status === "failed"  ||
+    (isExpired && order.expiredAt !== null);
 
   return (
     <div className="max-w-md mx-auto">
-      <h1 className="font-outfit text-2xl font-black text-center mb-2">Selesaikan Pembayaran</h1>
+      <h1 className="font-outfit text-2xl font-black text-center mb-2">
+        Selesaikan Pembayaran
+      </h1>
       <p className="text-muted text-sm text-center mb-6">
         Scan QRIS di bawah menggunakan aplikasi dompet digital apapun
       </p>
 
       <div className="bg-card border border-border rounded-3xl overflow-hidden mb-6">
-        {/* Order info */}
-        <div className="px-5 py-4 border-b border-border">
-          <div className="flex justify-between text-sm mb-1.5">
+        {/* Info order */}
+        <div className="px-5 py-4 border-b border-border space-y-1.5">
+          <div className="flex justify-between text-sm">
             <span className="text-muted">No. Invoice</span>
             <span className="font-mono font-semibold text-xs">{orderId}</span>
           </div>
           {order.productName && (
-            <div className="flex justify-between text-sm mb-1.5">
+            <div className="flex justify-between text-sm">
               <span className="text-muted">Produk</span>
               <span className="font-semibold text-right max-w-[60%] truncate">{order.productName}</span>
             </div>
@@ -124,8 +133,8 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
           )}
         </div>
 
-        {/* Countdown */}
-        {!isExpiredStatus && (
+        {/* Countdown — hanya tampil kalau expiredAt ada dan belum expired */}
+        {!isExpiredStatus && order.expiredAt && (
           <div className="flex items-center justify-center gap-2 py-3 bg-yellow-400/8 border-b border-border">
             <Clock size={14} className="text-yellow-400" />
             <span className="text-sm font-semibold text-yellow-400">
@@ -134,7 +143,7 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
           </div>
         )}
 
-        {/* QRIS Image */}
+        {/* QRIS */}
         <div className="p-6 flex flex-col items-center">
           {isExpiredStatus ? (
             <div className="text-center py-8">
