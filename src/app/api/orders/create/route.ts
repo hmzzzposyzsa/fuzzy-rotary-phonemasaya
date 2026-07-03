@@ -20,7 +20,6 @@ export async function POST(req: NextRequest) {
   const { data, error } = parseBody(CreateOrderSchema, body);
   if (error || !data) return NextResponse.json({ error: error ?? "Invalid body" }, { status: 400 });
 
-  // Ambil detail produk dari API eksternal
   let product: Awaited<ReturnType<typeof getProductById>>;
   try {
     product = await getProductById(data.productId);
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
 
   const orderId = generateOrderId();
 
-  // Buat pembayaran QRIS via payment gateway
   const pgResult = await createPayment({
     amount:        product.price,
     itemName:      product.name,
@@ -45,30 +43,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Kalau PG tidak return expiredAt, default 15 menit dari sekarang
+  // Default 5 menit kalau PG tidak return expiredAt
   const expiredAt = pgResult.expiredAt
     ? pgResult.expiredAt
-    : new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    : new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-  // Simpan order ke Supabase
-  await saveOrder({
-    orderId,
-    pgOrderId:     pgResult.pgOrderId ?? null,
-    productId:     data.productId,
-    productName:   product.name,
-    amount:        product.price,
-    gameUserId:    data.gameUserId,
-    serverId:      data.serverId,
-    email:         data.email,
-    userId:        data.userId,
-    paymentMethod: "qris",
-    status:        "pending",
-    qrisUrl:       pgResult.qrisUrl ?? null,
-    qrisData:      pgResult.qrisData ?? null,
-    expiredAt,
-    createdAt:     new Date().toISOString(),
-    paidAt:        null,
-  });
+  // PENTING: await dulu sebelum return — supaya order tersimpan ke Supabase
+  // sebelum frontend mulai polling /api/orders/status
+  try {
+    await saveOrder({
+      orderId,
+      pgOrderId:     pgResult.pgOrderId ?? null,
+      productId:     data.productId,
+      productName:   product.name,
+      amount:        product.price,
+      gameUserId:    data.gameUserId,
+      serverId:      data.serverId,
+      email:         data.email,
+      userId:        data.userId,
+      paymentMethod: "qris",
+      status:        "pending",
+      qrisUrl:       pgResult.qrisUrl ?? null,
+      qrisData:      pgResult.qrisData ?? null,
+      expiredAt,
+      createdAt:     new Date().toISOString(),
+      paidAt:        null,
+    });
+  } catch (err: any) {
+    console.error("[saveOrder error]", err?.message);
+    // Tetap lanjut walaupun Supabase gagal — QR tetap bisa tampil
+  }
 
   return NextResponse.json({
     ok:          true,
