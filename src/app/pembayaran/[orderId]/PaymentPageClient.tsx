@@ -55,23 +55,27 @@ export default function PaymentPageClient({ orderId }: { orderId: string }) {
   const fetchStatus = useCallback(async () => {
     try {
       const res  = await fetch(`/api/orders/status?orderId=${orderId}`);
+      // kalau rate limited, skip update tapi jangan stop polling
+      if (res.status === 429) return;
       if (!res.ok) return;
       const data = await res.json();
 
+      const newStatus = data.status as OrderData["status"];
+
       setOrder((prev) => ({
         ...prev,
-        status:      data.status                  ?? prev.status,
+        status:      newStatus                    ?? prev.status,
         qrisUrl:     data.order?.qrisUrl          ?? prev.qrisUrl,
         expiredAt:   data.order?.expiredAt        ?? prev.expiredAt,
         productName: data.order?.productName      ?? prev.productName,
         amount:      data.order?.amount           ?? prev.amount,
       }));
 
-      if (data.status === "success") {
+      if (newStatus === "success") {
         router.push(`/pembayaran/${orderId}/success`);
       }
     } catch {
-      // polling error — abaikan, QR tetap tampil dari URL params
+      // polling error — abaikan, lanjut
     }
   }, [orderId, router]);
 
