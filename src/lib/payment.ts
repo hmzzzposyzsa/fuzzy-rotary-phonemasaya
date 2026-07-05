@@ -79,7 +79,7 @@ export async function checkPaymentStatus(idOrder: string): Promise<CheckStatusRe
     const res = await fetch(`${PG_BASE}/check-status.php`, {
       method:  "POST",
       headers: pgHeaders(),
-      body:    JSON.stringify({ idOrder }),
+      body:    JSON.stringify({ deposit_ref: idOrder }),
     });
 
     if (!res.ok) return { ok: false, error: `PG error ${res.status}` };
