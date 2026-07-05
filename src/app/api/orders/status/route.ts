@@ -16,22 +16,23 @@ export async function GET(req: NextRequest) {
   const order = await getOrder(orderId);
   if (!order) return NextResponse.json({ error: "Order tidak ditemukan" }, { status: 404 });
 
-  // Kalau sudah final, return langsung tanpa hit PG
+  // PRIORITAS: kalau Supabase sudah final (diupdate webhook), langsung return
+  // Tidak perlu hit PG sama sekali
   if (order.status === "success" || order.status === "failed" || order.status === "expired") {
     return NextResponse.json({ status: order.status, order });
   }
 
-  // pgOrderId fallback ke orderId kita sendiri
-  // (karena PG sekarang pakai order ID kita sebagai idOrder)
-  const pgOrderId = order.pgOrderId || order.orderId;
-
-  const pgResult = await checkPaymentStatus(pgOrderId);
-  if (pgResult.ok && pgResult.status && pgResult.status !== "pending") {
-    const updated = await updateOrderStatus(orderId, pgResult.status, {
-      paidAt: pgResult.status === "success" ? new Date().toISOString() : null,
-    });
-    return NextResponse.json({ status: pgResult.status, order: updated ?? order });
+  // Kalau Supabase masih pending, baru cek ke PG sebagai fallback
+  if (order.pgOrderId) {
+    const pgResult = await checkPaymentStatus(order.pgOrderId);
+    if (pgResult.ok && pgResult.status && pgResult.status !== "pending") {
+      const updated = await updateOrderStatus(orderId, pgResult.status, {
+        paidAt: pgResult.status === "success" ? new Date().toISOString() : null,
+      });
+      return NextResponse.json({ status: pgResult.status, order: updated ?? order });
+    }
   }
 
-  return NextResponse.json({ status: order.status, order });
+  // Masih pending
+  return NextResponse.json({ status: "pending", order });
 }
