@@ -18,7 +18,7 @@ function getRedis() {
 export type LimiterType = "api" | "auth" | "otp" | "payment";
 
 const configs: Record<LimiterType, { requests: number; window: string }> = {
-  api:     { requests: 10, window: "10 s" },
+  api:     { requests: 30, window: "10 s" },
   auth:    { requests: 5,  window: "1 m"  },
   otp:     { requests: 3,  window: "5 m"  },
   payment: { requests: 3,  window: "1 m"  },
