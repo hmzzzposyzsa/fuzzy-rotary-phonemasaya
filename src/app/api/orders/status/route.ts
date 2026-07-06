@@ -16,23 +16,28 @@ export async function GET(req: NextRequest) {
   const order = await getOrder(orderId);
   if (!order) return NextResponse.json({ error: "Order tidak ditemukan" }, { status: 404 });
 
-  // PRIORITAS: kalau Supabase sudah final (diupdate webhook), langsung return
-  // Tidak perlu hit PG sama sekali
+  // Supabase sudah final — langsung return, JANGAN hit PG
   if (order.status === "success" || order.status === "failed" || order.status === "expired") {
     return NextResponse.json({ status: order.status, order });
   }
 
-  // Kalau Supabase masih pending, baru cek ke PG sebagai fallback
+  // Masih pending di Supabase — cek PG sebagai fallback
+  // tapi HANYA update kalau PG bilang SUCCESS/FAILED/EXPIRED
+  // kalau PG masih PENDING, tetap return status dari Supabase (pending)
   if (order.pgOrderId) {
     const pgResult = await checkPaymentStatus(order.pgOrderId);
-    if (pgResult.ok && pgResult.status && pgResult.status !== "pending") {
-      const updated = await updateOrderStatus(orderId, pgResult.status, {
-        paidAt: pgResult.status === "success" ? new Date().toISOString() : null,
+    if (pgResult.ok && pgResult.status === "success") {
+      const updated = await updateOrderStatus(orderId, "success", {
+        paidAt: new Date().toISOString(),
       });
+      return NextResponse.json({ status: "success", order: updated ?? order });
+    }
+    if (pgResult.ok && (pgResult.status === "failed" || pgResult.status === "expired")) {
+      const updated = await updateOrderStatus(orderId, pgResult.status);
       return NextResponse.json({ status: pgResult.status, order: updated ?? order });
     }
   }
 
-  // Masih pending
+  // Tetap pending
   return NextResponse.json({ status: "pending", order });
 }
